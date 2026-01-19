@@ -15,4 +15,4 @@ pydantic-settings
 python-dotenv
 httpx
 email-validator
-
+PyPDF2

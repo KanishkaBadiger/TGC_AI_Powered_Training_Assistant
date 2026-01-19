@@ -3,3 +3,12 @@ venv/
 __pycache__/
 database/sqlite/app.db
 database/chroma/
+
+
+
+*.db
+*.sqlite
+node_modules/
+.streamlit/
+.idea/
+.vscode/

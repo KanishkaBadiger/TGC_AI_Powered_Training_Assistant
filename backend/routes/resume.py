@@ -1,205 +1,200 @@
-"""
-Resume routes for analyzing resumes and identifying skill gaps
-"""
-from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
-from db.sqlite import get_connection
-from services.resume_analyzer import ResumeAnalyzer
-from services.vector_service import VectorService
-from utils.jwt_handler import verify_token
-from datetime import datetime
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from groq import Groq
+import os
 import json
+import uuid
+from typing import Dict
+from dotenv import load_dotenv
+load_dotenv()
 
-router = APIRouter()
+# Import your models and utils
+from models.resume import (
+    RoleMatchingRequest, RoleMatchingResponse,
+    ResumeScoreRequest, ResumeScoreResponse,
+    SkillGapRequest, SkillGapResponse,
+    UpskillingRequest, UpskillingResponse,
+    InterviewPrepRequest, InterviewPrepResponse
+)
+from utils.resume_helper import extract_text_from_file
 
+# Initialize Router and Groq
+router = APIRouter(prefix="/api/resume", tags=["Resume Analysis"])
+
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+# --- TEMPORARY STORAGE (Replace with your DB logic) ---
+# Format: { "resume_id_123": "Full text of resume..." }
+RESUME_STORAGE: Dict[str, str] = {}
+
+def get_resume_text(resume_id: str):
+    """Helper to fetch resume text. Replace with DB call later."""
+    if resume_id not in RESUME_STORAGE:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return RESUME_STORAGE[resume_id]
+
+# --- 1. UPLOAD RESUME ---
 @router.post("/upload")
-async def upload_resume(file: UploadFile = File(...), user=Depends(verify_token)):
-    """Upload and analyze resume"""
-    try:
-        # Read file content
-        content = await file.read()
-        resume_text = content.decode('utf-8')
-        
-        # Analyze resume
-        analysis = ResumeAnalyzer.parse_resume(resume_text)
-        
-        # Save to database
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            """INSERT INTO resumes 
-            (user_id, file_path, file_name, content, skills_extracted, experience_years, 
-            education_details, uploaded_at, analyzed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                user['user_id'],
-                f"resumes/{user['user_id']}/{file.filename}",
-                file.filename,
-                resume_text,
-                json.dumps(analysis.get('skills', [])),
-                analysis.get('experience_years', 0),
-                json.dumps(analysis.get('education', [])),
-                datetime.now(),
-                datetime.now()
-            )
-        )
-        
-        resume_id = cursor.lastrowid
-        conn.commit()
-        
-        # Add to vector database for similarity search
-        VectorService.add_resume_embeddings(user['user_id'], resume_text)
-        
-        # Update user profile with extracted skills
-        cursor.execute(
-            """UPDATE user_profiles 
-            SET education=?, experience_years=?, skills=?
-            WHERE user_id=?""",
-            (
-                json.dumps(analysis.get('education', [])),
-                analysis.get('experience_years', 0),
-                json.dumps(analysis.get('skills', [])),
-                user['user_id']
-            )
-        )
-        
-        conn.commit()
-        conn.close()
-        
-        return {
-            "resume_id": resume_id,
-            "message": "Resume uploaded and analyzed successfully",
-            "analysis": {
-                "skills": analysis.get('skills', []),
-                "experience_years": analysis.get('experience_years', 0),
-                "education": analysis.get('education', []),
-                "certifications": analysis.get('certifications', []),
-                "languages": analysis.get('languages', [])
-            }
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
+async def upload_resume(file: UploadFile = File(...)):
+    text = extract_text_from_file(file)
+    if not text:
+        raise HTTPException(status_code=400, detail="Could not extract text from file")
+    
+    # Generate a unique ID and store text
+    resume_id = str(uuid.uuid4())
+    RESUME_STORAGE[resume_id] = text
+    
+    return {"resume_id": resume_id, "resume_text": text}
 
-@router.get("/analysis/{resume_id}")
-def get_resume_analysis(resume_id: int, user=Depends(verify_token)):
-    """Get detailed resume analysis"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            """SELECT skills_extracted, experience_years, education_details, analyzed_at 
-            FROM resumes WHERE id=? AND user_id=?""",
-            (resume_id, user['user_id'])
-        )
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if not result:
-            raise HTTPException(404, "Resume not found")
-        
-        return {
-            "resume_id": resume_id,
-            "skills": json.loads(result[0]) if result[0] else [],
-            "experience_years": result[1],
-            "education": json.loads(result[2]) if result[2] else [],
-            "analyzed_at": result[3]
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
+# --- 2. ROLE MATCHING ---
+@router.post("/role-matching", response_model=RoleMatchingResponse)
+async def role_matching(request: RoleMatchingRequest):
+    resume_text = get_resume_text(request.resume_id)
+    
+    prompt = f"""
+    Analyze the resume against the target role and JD.
+    Resume: {resume_text[:4000]}
+    Role: {request.target_role}
+    JD: {request.job_description[:2000]}
+    
+    Return JSON:
+    {{
+        "match_percentage": <int>,
+        "overall_assessment": "<short summary>",
+        "target_role": "{request.target_role}",
+        "matching_skills": [<list of matching skills>],
+        "mismatching_skills": [<list of missing or weak skills>]
+    }}
+    """
+    
+    response = get_groq_response(prompt)
+    return response
 
-@router.post("/skill-gap")
-def analyze_skill_gap(target_role: str, user=Depends(verify_token)):
-    """Analyze skill gaps for target role"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Get user's current skills
-        cursor.execute(
-            "SELECT skills FROM user_profiles WHERE user_id=?",
-            (user['user_id'],)
-        )
-        result = cursor.fetchone()
-        current_skills = json.loads(result[0]) if result and result[0] else []
-        
-        # Analyze skill gaps
-        gap_analysis = ResumeAnalyzer.analyze_skill_gaps(
-            current_skills=current_skills,
-            target_role=target_role,
-            user_id=user['user_id']
-        )
-        
-        # Save analysis to database
-        cursor.execute(
-            """INSERT INTO skill_gaps 
-            (user_id, target_role, required_skills, current_skills, missing_skills, 
-            skill_proficiency_gap, recommendations, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                user['user_id'],
-                target_role,
-                json.dumps(gap_analysis.get('required_skills', [])),
-                json.dumps(current_skills),
-                json.dumps(gap_analysis.get('missing_skills', [])),
-                json.dumps(gap_analysis.get('skill_match_percentage', 0)),
-                json.dumps(gap_analysis.get('recommendations', [])),
-                datetime.now()
-            )
-        )
-        
-        conn.commit()
-        conn.close()
-        
-        return {
-            "target_role": target_role,
-            "current_skills": current_skills,
-            "required_skills": gap_analysis.get('required_skills', []),
-            "missing_skills": gap_analysis.get('missing_skills', []),
-            "skill_match_percentage": gap_analysis.get('skill_match_percentage', 0),
-            "priority_skills": gap_analysis.get('priority_skills', []),
-            "estimated_learning_time_weeks": gap_analysis.get('estimated_learning_time_weeks', 0),
-            "recommendations": gap_analysis.get('recommendations', [])
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
+# --- 3. RESUME SCORE ---
+@router.post("/resume-score", response_model=ResumeScoreResponse)
+async def resume_score(request: ResumeScoreRequest):
+    resume_text = get_resume_text(request.resume_id)
+    
+    prompt = f"""
+    Act as an ATS. Score this resume based on the JD.
+    Resume: {resume_text[:4000]}
+    JD: {request.job_description[:2000]}
+    
+    Return JSON:
+    {{
+        "ats_score": <int 0-100>,
+        "score_breakdown": {{
+            "technical_skills": <int>,
+            "experience": <int>,
+            "education": <int>,
+            "achievements": <int>
+        }},
+        "strengths": [<list>],
+        "weaknesses": [<list>],
+        "ats_keywords_found": [<list>],
+        "improvement_suggestions": [<list>]
+    }}
+    """
+    response = get_groq_response(prompt)
+    return response
 
-@router.get("/skill-development-plan")
-def get_skill_development_plan(target_role: str, user=Depends(verify_token)):
-    """Get detailed skill development plan"""
+# --- 4. SKILL GAP ---
+@router.post("/skill-gap", response_model=SkillGapResponse)
+async def skill_gap(request: SkillGapRequest):
+    resume_text = get_resume_text(request.resume_id)
+    
+    prompt = f"""
+    Perform a strict Skill Gap Analysis.
+    Resume: {resume_text[:4000]}
+    Role: {request.target_role}
+    JD: {request.job_description[:2000]}
+    
+    Return JSON:
+    {{
+        "current_skills": [<skills found in resume>],
+        "required_skills": [<skills found in JD>],
+        "gap_percentage": <int>,
+        "missing_skills": [<skills in JD but not in resume>],
+        "priority_missing_skills": [<top 5 critical missing skills>],
+        "priority_roadmap": [<ordered list of what to learn first>]
+    }}
+    """
+    response = get_groq_response(prompt)
+    return response
+
+# --- 5. UPSKILLING ---
+@router.post("/upskilling-recommendations", response_model=UpskillingResponse)
+async def upskilling(request: UpskillingRequest):
+    # This doesn't strictly need resume text if missing_skills are provided
+    skills_to_learn = ", ".join(request.missing_skills)
+    
+    prompt = f"""
+    Create a learning plan for these missing skills: {skills_to_learn}.
+    User has {request.available_hours_per_week} hours/week.
+    
+    Return JSON:
+    {{
+        "total_recommendations": <int count of skills>,
+        "estimated_total_weeks": <int total weeks to learn all>,
+        "upskilling_recommendations": [
+            {{
+                "skill": "<skill name>",
+                "estimated_time_weeks": <int>,
+                "priority": "High/Medium/Low",
+                "learning_path_steps": ["Step 1", "Step 2"],
+                "learning_resources": ["Book X", "Course Y"]
+            }}
+        ],
+        "priority_roadmap": ["Week 1-2: Skill A", "Week 3: Skill B"]
+    }}
+    """
+    response = get_groq_response(prompt)
+    return response
+
+# --- 6. INTERVIEW PREP ---
+@router.post("/interview-questions", response_model=InterviewPrepResponse)
+async def interview_prep(request: InterviewPrepRequest):
+    resume_text = get_resume_text(request.resume_id)
+    
+    prompt = f"""
+    Generate {request.num_questions} interview questions for a {request.target_role}.
+    Based on Resume: {resume_text[:3000]}
+    And JD: {request.job_description[:2000]}
+    
+    Return JSON:
+    {{
+        "interview_questions": [
+            {{
+                "question": "<question text>",
+                "question_type": "Technical/Behavioral/Situational",
+                "difficulty": "Easy/Medium/Hard",
+                "related_skill": "<skill name>",
+                "answer_tips": ["Tip 1", "Tip 2"],
+                "sample_answer": "<short sample>",
+                "key_points_to_cover": ["Point A", "Point B"]
+            }}
+        ],
+        "preparation_tips": ["General tip 1", "General tip 2"],
+        "common_questions_for_role": ["Common Q1", "Common Q2"]
+    }}
+    """
+    response = get_groq_response(prompt)
+    return response
+
+# --- HELPER FOR GROQ ---
+def get_groq_response(prompt_text: str):
+    """Sends prompt to Groq and parses JSON"""
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Get user's current skills
-        cursor.execute(
-            "SELECT skills FROM user_profiles WHERE user_id=?",
-            (user['user_id'],)
+        completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": "You are a specialized AI Resume Assistant. Output ONLY valid JSON."},
+                {"role": "user", "content": prompt_text}
+            ],
+            # model="llama3-70b-8192",
+            model="llama-3.3-70b-versatile",
+            response_format={"type": "json_object"},
+            temperature=0.1
         )
-        result = cursor.fetchone()
-        current_skills = json.loads(result[0]) if result and result[0] else []
-        
-        # Get required skills for target role
-        cursor.execute(
-            "SELECT required_skills FROM skill_gaps WHERE user_id=? AND target_role=? ORDER BY created_at DESC LIMIT 1",
-            (user['user_id'], target_role)
-        )
-        gap_result = cursor.fetchone()
-        target_skills = json.loads(gap_result[0]) if gap_result and gap_result[0] else []
-        
-        conn.close()
-        
-        # Generate development plan
-        plan = ResumeAnalyzer.generate_skill_development_plan(
-            current_skills=current_skills,
-            target_skills=target_skills,
-            available_hours_per_week=10
-        )
-        
-        return {
-            "target_role": target_role,
-            "plan": plan
-        }
+        return json.loads(completion.choices[0].message.content)
     except Exception as e:
-        raise HTTPException(500, str(e))
+        print(f"Groq Error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI Processing Failed: {str(e)}")
