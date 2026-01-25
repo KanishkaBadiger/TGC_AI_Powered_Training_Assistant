@@ -1,5 +1,14 @@
+import sys
+import os
+
+# 1. Add the parent directory (Project Root) to sys.path
+# This allows python to "see" the database folder sitting outside
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(BASE_DIR)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from database.database import engine, Base
 from routes import auth, progress, quiz, resume, jobs, roadmap, aptitude
 
 app = FastAPI(
@@ -24,7 +33,7 @@ app.include_router(quiz.router, prefix="/api/quiz", tags=["Quiz"])
 # app.include_router(resume.router, prefix="/api/resume", tags=["Resume"])
 app.include_router(resume.router)
 app.include_router(jobs.router,tags=["Jobs"])
-app.include_router(roadmap.router, prefix="/api/roadmap", tags=["Roadmap"])
+app.include_router(roadmap.router)
 app.include_router(aptitude.router, prefix="/api/leaderboard", tags=["Leaderboard"])
 
 @app.get("/")

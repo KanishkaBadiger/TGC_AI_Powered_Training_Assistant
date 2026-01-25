@@ -48,8 +48,10 @@ def login_page():
                         
                         if response.status_code == 200:
                             data = response.json()
-                            st.session_state.token = data.get("access_token")
-                            st.session_state.user = data.get("user")
+        
+                            # ✅ SAVE USER DATA TO SESSION STATE
+                            st.session_state['token'] = data['access_token']
+                            st.session_state['user'] = data['user']  # <--- THIS IS CRITICAL
                             st.success("✅ Login successful!")
                             time.sleep(1)
                             st.session_state.page = "home"

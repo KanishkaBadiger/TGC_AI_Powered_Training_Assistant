@@ -1,203 +1,220 @@
-"""
-Roadmap routes for learning path and milestone tracking
-"""
-from fastapi import APIRouter, HTTPException, Depends
-from db.sqlite import get_connection
-from services.llm_service import LLMService
-from utils.jwt_handler import verify_token
-from datetime import datetime, timedelta
-import json
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from datetime import date, timedelta
+from database.database import get_db
+from database import models
+from backend.models.roadmap_ai import generate_roadmap_plan # Import utility
 
-router = APIRouter()
+router = APIRouter(prefix="/api/roadmap", tags=["Roadmap"])
 
+# 1. GENERATE NEW ROADMAP
 @router.post("/generate")
-def generate_roadmap(
-    current_role: str,
-    target_role: str,
-    available_hours_per_week: int = 10,
-    user=Depends(verify_token)
+def create_roadmap(
+    user_id: str, 
+    role: str, 
+    skill_level: str, 
+    roadmap_type: str, 
+    end_date: date,
+    db: Session = Depends(get_db)
 ):
-    """Generate personalized learning roadmap"""
-    try:
-        # Generate roadmap using LLM
-        roadmap_data = LLMService.generate_personalized_roadmap(
-            current_role=current_role,
-            target_role=target_role,
-            available_hours_per_week=available_hours_per_week
+    # Calculate duration
+    start_date = date.today()
+    days_count = (end_date - start_date).days
+    
+    if days_count < 7:
+        raise HTTPException(status_code=400, detail="Timeline too short (min 7 days)")
+
+    # Call AI
+    ai_plan = generate_roadmap_plan(role, days_count, skill_level, roadmap_type)
+    
+    # Save Parent Roadmap
+    new_roadmap = models.Roadmap(
+        user_id=user_id, role=role, skill_level=skill_level,
+        start_date=start_date, end_date=end_date
+    )
+    db.add(new_roadmap)
+    db.commit()
+    db.refresh(new_roadmap)
+    
+    # Save Daily Tasks
+    current_date = start_date
+    for day_plan in ai_plan:
+        task = models.RoadmapTask(
+            roadmap_id=new_roadmap.id,
+            day_number=day_plan['day'],
+            module_name=day_plan['module'],
+            topic=day_plan['topic'],
+            description=day_plan['description'],
+            resources=day_plan['resources'],
+            estimated_minutes=day_plan['time_min'],
+            date_assigned=current_date,
+            status="PENDING"
         )
+        db.add(task)
+        current_date += timedelta(days=1)
+    
+    db.commit()
+    return {"message": "Roadmap created successfully", "roadmap_id": new_roadmap.id}
+
+# 2. GET TODAY'S STATUS (With Missed Day Intelligence)
+@router.get("/dashboard/{user_id}")
+def get_dashboard(user_id: str, db: Session = Depends(get_db)):
+    today = date.today()
+    
+    # 1. Fetch Roadmap
+    roadmap = db.query(models.Roadmap).filter(
+        models.Roadmap.user_id == user_id
+    ).order_by(models.Roadmap.id.desc()).first()
+    
+    if not roadmap:
+        return {"status": "no_roadmap"}
+
+    # 2. Logic: Auto-Mark Missed Tasks
+    # If a task was due BEFORE today and is still PENDING, mark it MISSED
+    overdue_tasks = db.query(models.RoadmapTask).filter(
+        models.RoadmapTask.roadmap_id == roadmap.id,
+        models.RoadmapTask.date_assigned < today,
+        models.RoadmapTask.status == "PENDING"
+    ).all()
+    
+    for task in overdue_tasks:
+        task.status = "MISSED"
+    db.commit()
+
+    # 3. Fetch ALL tasks for the Calendar
+    all_tasks = db.query(models.RoadmapTask).filter(
+        models.RoadmapTask.roadmap_id == roadmap.id
+    ).all()
+
+    return {
+        "status": "active",
+        "roadmap_details": {
+            "id": roadmap.id,
+            "role": roadmap.role,
+            "start_date": roadmap.start_date,
+            "skill_level": roadmap.skill_level, 
+            "is_paused": roadmap.is_paused
+        },
+        "all_tasks": all_tasks  # <--- NEW: Send all tasks to frontend
+    }
+# 3. MARK COMPLETE (Gamification Trigger)
+@router.post("/complete/{task_id}")
+def complete_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(models.RoadmapTask).filter(models.RoadmapTask.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "Task not found")
         
-        # Save to database
-        conn = get_connection()
-        cursor = conn.cursor()
+    task.status = "COMPLETED"
+    
+    # Logic to add XP/Points to Leaderboard would go here
+    # add_leaderboard_points(user_id, points=10)
+    
+    db.commit()
+    return {"message": "Task Completed! +10 XP"}
+
+# 4. RESCHEDULE (Shift everything forward)
+@router.post("/reschedule/{roadmap_id}")
+def reschedule_roadmap(roadmap_id: int, db: Session = Depends(get_db)):
+    """
+    Shifts all PENDING or MISSED tasks to start from TODAY.
+    Effectively 'pausing' time for the days missed.
+    """
+    today = date.today()
+    
+    # Get all incomplete tasks ordered by day
+    incomplete_tasks = db.query(models.RoadmapTask).filter(
+        models.RoadmapTask.roadmap_id == roadmap_id,
+        models.RoadmapTask.status.in_(["PENDING", "MISSED"])
+    ).order_by(models.RoadmapTask.day_number).all()
+    
+    # Shift dates
+    current_date = today
+    for task in incomplete_tasks:
+        task.date_assigned = current_date
+        task.status = "PENDING" # Reset missed status
+        current_date += timedelta(days=1)
         
-        cursor.execute(
-            """INSERT INTO learning_roadmap 
-            (user_id, roadmap_name, target_goal, description, modules, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)""",
-            (
-                user['user_id'],
-                f"{current_role} to {target_role}",
-                target_role,
-                roadmap_data.get('title', ''),
-                json.dumps(roadmap_data.get('modules', [])),
-                datetime.now()
-            )
-        )
+    db.commit()
+    return {"message": "Roadmap rescheduled. You're back on track!"}
+
+# 5.Finish early
+@router.post("/finish_early/{roadmap_id}")
+def finish_early(roadmap_id: int, db: Session = Depends(get_db)):
+    """
+    Finds the first PENDING task (even if it's tomorrow) and marks it COMPLETED today.
+    """
+    today = date.today()
+    
+    # Get the next pending task sorted by day number
+    next_task = db.query(models.RoadmapTask).filter(
+        models.RoadmapTask.roadmap_id == roadmap_id,
+        models.RoadmapTask.status == "PENDING"
+    ).order_by(models.RoadmapTask.day_number).first()
+    
+    if not next_task:
+        raise HTTPException(status_code=404, detail="No pending tasks found!")
         
-        roadmap_id = cursor.lastrowid
+    # Mark it done
+    next_task.status = "COMPLETED"
+    
+    # Optional: If you want to strictly shift dates, logic is complex.
+    # For now, we just mark it done. The calendar will turn it Green.
+    # If the date was in the future, we effectively 'finished early'.
+    
+    db.commit()
+    return {"message": "Task completed early! Keep up the streak."}
+
+#6. pause and resume
+@router.post("/toggle_pause/{roadmap_id}")
+def toggle_pause(roadmap_id: int, db: Session = Depends(get_db)):
+    roadmap = db.query(models.Roadmap).filter(models.Roadmap.id == roadmap_id).first()
+    if not roadmap:
+        raise HTTPException(404, "Roadmap not found")
+    
+    # TOGGLE LOGIC
+    if roadmap.is_paused:
+        # RESUMING: We must shift dates!
+        roadmap.is_paused = False
         
-        # Add milestones
-        modules = roadmap_data.get('modules', [])
-        for idx, module in enumerate(modules):
-            start_date = datetime.now() + timedelta(weeks=idx*4)
-            end_date = start_date + timedelta(weeks=4)
+        # 1. Find the first pending task (where we left off)
+        first_pending = db.query(models.RoadmapTask).filter(
+            models.RoadmapTask.roadmap_id == roadmap.id,
+            models.RoadmapTask.status.in_(["PENDING", "MISSED"])
+        ).order_by(models.RoadmapTask.day_number).first()
+        
+        if first_pending:
+            # Calculate the shift: Make the first pending task due TODAY
+            shift_start_date = first_pending.date_assigned
+            today = date.today()
+            days_diff = (today - shift_start_date).days
             
-            cursor.execute(
-                """INSERT INTO roadmap_milestones 
-                (roadmap_id, milestone_name, description, start_date, end_date, status)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (
-                    roadmap_id,
-                    module.get('module_name', f'Module {idx+1}'),
-                    json.dumps(module),
-                    start_date.date(),
-                    end_date.date(),
-                    'pending'
-                )
-            )
-        
-        # Update user profile
-        cursor.execute(
-            "UPDATE user_profiles SET target_role=? WHERE user_id=?",
-            (target_role, user['user_id'])
-        )
-        
-        conn.commit()
-        conn.close()
-        
-        return {
-            "roadmap_id": roadmap_id,
-            "roadmap_name": f"{current_role} to {target_role}",
-            "target_goal": target_role,
-            "estimated_duration_months": roadmap_data.get('duration_months', 0),
-            "modules": roadmap_data.get('modules', []),
-            "timeline": roadmap_data.get('timeline', []),
-            "resources": roadmap_data.get('resources', {}),
-            "message": "Roadmap generated successfully"
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
+            # If days_diff is positive, it means we are late. Shift everything forward.
+            if days_diff > 0:
+                all_future_tasks = db.query(models.RoadmapTask).filter(
+                    models.RoadmapTask.roadmap_id == roadmap.id,
+                    models.RoadmapTask.day_number >= first_pending.day_number
+                ).all()
+                
+                for task in all_future_tasks:
+                    task.date_assigned += timedelta(days=days_diff)
 
-@router.get("/{roadmap_id}")
-def get_roadmap(roadmap_id: int, user=Depends(verify_token)):
-    """Get roadmap details"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            """SELECT id, roadmap_name, target_goal, description, modules, created_at 
-            FROM learning_roadmap WHERE id=? AND user_id=?""",
-            (roadmap_id, user['user_id'])
-        )
-        
-        result = cursor.fetchone()
-        
-        if not result:
-            raise HTTPException(404, "Roadmap not found")
-        
-        # Get milestones
-        cursor.execute(
-            """SELECT id, milestone_name, description, start_date, end_date, status, progress_percentage
-            FROM roadmap_milestones WHERE roadmap_id=? ORDER BY start_date""",
-            (roadmap_id,)
-        )
-        
-        milestones = []
-        for row in cursor.fetchall():
-            milestones.append({
-                "id": row[0],
-                "milestone_name": row[1],
-                "description": json.loads(row[2]) if row[2] else {},
-                "start_date": row[3],
-                "end_date": row[4],
-                "status": row[5],
-                "progress_percentage": row[6]
-            })
-        
-        conn.close()
-        
-        return {
-            "id": result[0],
-            "roadmap_name": result[1],
-            "target_goal": result[2],
-            "description": result[3],
-            "modules": json.loads(result[4]) if result[4] else [],
-            "milestones": milestones,
-            "created_at": result[5]
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
+    else:
+        # PAUSING: Just set the flag
+        roadmap.is_paused = True
+    
+    db.commit()
+    return {"status": "paused" if roadmap.is_paused else "active"}
 
-@router.put("/{roadmap_id}/milestone/{milestone_id}")
-def update_milestone(
-    roadmap_id: int,
-    milestone_id: int,
-    status: str,
-    progress_percentage: int = 0,
-    user=Depends(verify_token)
-):
-    """Update milestone status and progress"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        # Verify ownership
-        cursor.execute(
-            "SELECT user_id FROM learning_roadmap WHERE id=?",
-            (roadmap_id,)
-        )
-        result = cursor.fetchone()
-        
-        if not result or result[0] != user['user_id']:
-            raise HTTPException(403, "Unauthorized")
-        
-        cursor.execute(
-            """UPDATE roadmap_milestones 
-            SET status=?, progress_percentage=? WHERE id=? AND roadmap_id=?""",
-            (status, progress_percentage, milestone_id, roadmap_id)
-        )
-        
-        conn.commit()
-        conn.close()
-        
-        return {"message": "Milestone updated successfully"}
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-@router.get("/user/roadmaps")
-def get_user_roadmaps(user=Depends(verify_token)):
-    """Get all user's roadmaps"""
-    try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            """SELECT id, roadmap_name, target_goal, created_at 
-            FROM learning_roadmap WHERE user_id=? ORDER BY created_at DESC""",
-            (user['user_id'],)
-        )
-        
-        roadmaps = []
-        for row in cursor.fetchall():
-            roadmaps.append({
-                "id": row[0],
-                "roadmap_name": row[1],
-                "target_goal": row[2],
-                "created_at": row[3]
-            })
-        
-        conn.close()
-        return {"roadmaps": roadmaps}
-    except Exception as e:
-        raise HTTPException(500, str(e))
+#Archive current roadmap
+@router.post("/archive/{user_id}")
+def archive_current_roadmap(user_id: str, db: Session = Depends(get_db)):
+    # Find the active roadmap
+    active_map = db.query(models.Roadmap).filter(
+        models.Roadmap.user_id == user_id,
+        models.Roadmap.is_active == True # You would need to add this column to your model
+    ).first()
+    
+    if active_map:
+        active_map.is_active = False
+        db.commit()
+    return {"message": "Archived"}
