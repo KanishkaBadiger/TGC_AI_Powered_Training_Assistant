@@ -15,7 +15,7 @@ def login_page():
     
     st.markdown("""
     <div class='header-main'>
-        <h1>🎓 AI Training Assistant</h1>
+        <h1>🎓 AI Powered Training Assistant</h1>
         <p>Master Your Skills with AI-Powered Learning</p>
     </div>
     """, unsafe_allow_html=True)

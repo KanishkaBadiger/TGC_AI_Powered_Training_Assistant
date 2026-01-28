@@ -80,20 +80,20 @@ def register_page():
         st.markdown("""
         <div class='info-card'>
             <div class='info-card-title'>📚 Comprehensive Learning</div>
-            <div class='info-card-desc'>Access 500+ AI-generated questions across Aptitude, Technical, and Core Subjects to strengthen your knowledge base.</div>
+            <div class='info-card-desc'>Access 50+ AI-generated questions across Aptitude, Technical, and Core Subjects to strengthen your knowledge base.</div>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("""
         <div class='info-card'>
-            <div class='info-card-title'>🎯 Personalized Paths</div>
+            <div class='info-card-title'>🎯 Personalized Roadmaps</div>
             <div class='info-card-desc'>Get customized learning roadmaps and career development plans tailored specifically to your goals and skill level.</div>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("""
         <div class='info-card'>
-            <div class='info-card-title'>💼 Job Opportunities</div>
+            <div class='info-card-title'>💼 Job/Internship Opportunities Finder</div>
             <div class='info-card-desc'>Receive real-time job recommendations matched to your skills, resume analysis, and interview preparation guidance.</div>
         </div>
         """, unsafe_allow_html=True)
@@ -101,6 +101,6 @@ def register_page():
         st.markdown("""
         <div class='info-card'>
             <div class='info-card-title'>🏆 Community & Growth</div>
-            <div class='info-card-desc'>Join 10,000+ learners, compete on leaderboards, maintain learning streaks, and achieve milestones together.</div>
+            <div class='info-card-desc'>Join 1,000+ learners, compete on leaderboards, maintain learning streaks, and achieve milestones together.</div>
         </div>
         """, unsafe_allow_html=True)

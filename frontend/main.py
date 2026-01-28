@@ -70,7 +70,7 @@ def home_page():
     with col2:
         st.metric(label="✅ Accuracy Rate", value="78%", delta="+5%")
     with col3:
-        st.metric(label="🔥 Current Streak", value="12 days", delta="🔥 Active")
+        st.metric(label="🔥 Current Streak", value="07 days", delta="🔥 Active")
     with col4:
         st.metric(label="🏆 Global Rank", value="#45", delta="⬆ 5 pos")
     
@@ -116,10 +116,10 @@ def home_page():
     features_data = [
         {"emoji": "📝", "title": "AI Quizzes", "desc": "Unlimited AI-generated questions with instant feedback and explanations"},
         {"emoji": "📊", "title": "Progress Analytics", "desc": "Detailed insights into your learning journey and improvement areas"},
-        {"emoji": "🏆", "title": "Leaderboards", "desc": "Compete with learners worldwide and track achievements"},
         {"emoji": "📄", "title": "Resume Analyzer", "desc": "AI-powered resume analysis identifying skill gaps and improvements"},
         {"emoji": "💼", "title": "Job Matching", "desc": "Curated job opportunities aligned with your skills and goals"},
         {"emoji": "🛣️", "title": "Learning Roadmaps", "desc": "Personalized career development paths with milestone tracking"},
+        {"emoji": "🏆", "title": "Leaderboards", "desc": "Compete with learners worldwide and track achievements"},
     ]
     
     cols = st.columns(3)
@@ -172,9 +172,9 @@ def home_page():
     stat_cols = st.columns(5)
     
     stats = [
-        {"value": "500+", "label": "Quiz Questions"},
+        {"value": "50+", "label": "Quiz Questions"},
         {"value": "50+", "label": "Job Postings"},
-        {"value": "10000+", "label": "Active Users"},
+        {"value": "1000+", "label": "Active Users"},
         {"value": "95%", "label": "Success Rate"},
         {"value": "24/7", "label": "Support"},
     ]
@@ -226,7 +226,7 @@ def home_page():
     ach_cols = st.columns(3)
     
     achievements = [
-        {"emoji": "🔥", "title": "12-Day Streak", "desc": "Keep your learning momentum!"},
+        {"emoji": "🔥", "title": "07-Day Streak", "desc": "Keep your learning momentum!"},
         {"emoji": "🎯", "title": "Expert Achiever", "desc": "50+ quizzes with 80%+ accuracy"},
         {"emoji": "⭐", "title": "Rising Star", "desc": "Climbed 10 positions"},
     ]

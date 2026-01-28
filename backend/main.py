@@ -1,5 +1,7 @@
 import sys
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 # 1. Add the parent directory (Project Root) to sys.path
 # This allows python to "see" the database folder sitting outside
@@ -9,7 +11,7 @@ sys.path.append(BASE_DIR)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database.database import engine, Base
-from routes import auth, progress, quiz, resume, jobs, roadmap, aptitude
+from routes import auth, progress, quiz, resume, jobs, roadmap, aptitude, leaderboard
 
 app = FastAPI(
     title="AI Powered Training Assistant API",
@@ -29,12 +31,13 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(progress.router, prefix="/api/progress", tags=["Progress"])
-app.include_router(quiz.router, prefix="/api/quiz", tags=["Quiz"])
-# app.include_router(resume.router, prefix="/api/resume", tags=["Resume"])
+app.include_router(quiz.router)
 app.include_router(resume.router)
 app.include_router(jobs.router,tags=["Jobs"])
 app.include_router(roadmap.router)
 app.include_router(aptitude.router, prefix="/api/leaderboard", tags=["Leaderboard"])
+app.include_router(leaderboard.router, tags=["Leaderboard"])
+
 
 @app.get("/")
 def home():

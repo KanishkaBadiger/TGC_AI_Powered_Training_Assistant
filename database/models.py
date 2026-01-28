@@ -24,6 +24,19 @@ class User(Base):
     leaderboard = relationship("Leaderboard", back_populates="user", uselist=False)
     roadmaps = relationship("Roadmap", back_populates="user")
     resumes = relationship("ResumeAnalysis", back_populates="user")
+    quiz_attempts = relationship("QuizAttempt", back_populates="user")
+
+class QuizAttempt(Base):
+    __tablename__ = "quiz_attempts"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    category = Column(String)
+    score = Column(Integer)
+    total_questions = Column(Integer)
+    xp_earned = Column(Integer)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    user = relationship("User", back_populates="quiz_attempts")
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"
@@ -64,13 +77,6 @@ class Streak(Base):
     last_activity_date = Column(Date, nullable=True)
     user = relationship("User", back_populates="streak")
 
-class Leaderboard(Base):
-    __tablename__ = "leaderboard"
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), unique=True)
-    rank = Column(Integer, default=999999)
-    user = relationship("User", back_populates="leaderboard")
-
 # --- ROADMAP ---
 class Roadmap(Base):
     __tablename__ = "roadmaps"
@@ -100,3 +106,33 @@ class RoadmapTask(Base):
     status = Column(String, default="PENDING")
     
     roadmap = relationship("Roadmap", back_populates="tasks")
+
+
+class Leaderboard(Base):
+    __tablename__ = "leaderboard"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True)
+    
+    # 🎯 The Core Metric
+    total_xp = Column(Integer, default=0)
+    
+    # 📅 Activity Counters (Reset daily via background job or check logic)
+    daily_quiz_count = Column(Integer, default=0)
+    daily_task_count = Column(Integer, default=0)
+    last_active_date = Column(Date, nullable=True)
+    
+    # 🔥 Streak Tracking
+    current_streak = Column(Integer, default=0)
+    max_streak = Column(Integer, default=0)
+    
+    # 🏆 Gamification Stats
+    badges_earned = Column(String, default="[]") # JSON string of badges
+    
+    user = relationship("User", back_populates="leaderboard")
+    
+    # Helper to reset daily limits if date changed
+    def check_daily_reset(self, today):
+        if self.last_active_date != today:
+            self.daily_quiz_count = 0
+            self.daily_task_count = 0
+            self.last_active_date = today

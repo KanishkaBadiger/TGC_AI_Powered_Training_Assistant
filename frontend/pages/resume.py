@@ -622,7 +622,7 @@ def resume_page():
                             
                             # Questions
                             for i, q in enumerate(data.get('interview_questions', []), 1):
-                                with st.expander(f"❓ **Q{i}: {q.get('question', '')[:60]}...**"):
+                                with st.expander(f"❓ **Q{i}: {q.get('question', '')[:120]}...**"):
                                     col_q1, col_q2 = st.columns(2)
                                     
                                     with col_q1:
