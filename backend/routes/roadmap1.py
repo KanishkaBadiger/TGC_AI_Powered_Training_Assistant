@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import date, timedelta
 from database.database import get_db
 from database import models
-from backend.models.roadmap_ai import generate_roadmap_plan # Import utility
+from backend.models.roadmap_ai1 import generate_roadmap_plan # Import utility
 
 router = APIRouter(prefix="/api/roadmap", tags=["Roadmap"])
 

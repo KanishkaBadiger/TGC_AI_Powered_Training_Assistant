@@ -1,6 +1,8 @@
 import sys
 import os
 from dotenv import load_dotenv
+
+from backend.routes import roadmap1
 load_dotenv()
 
 # 1. Add the parent directory (Project Root) to sys.path
@@ -11,7 +13,7 @@ sys.path.append(BASE_DIR)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database.database import engine, Base
-from routes import auth, progress, quiz, resume, jobs, roadmap, aptitude, leaderboard
+from routes import auth, progress, quiz, resume, jobs, aptitude, leaderboard, roadmap1
 
 app = FastAPI(
     title="AI Powered Training Assistant API",
@@ -34,7 +36,7 @@ app.include_router(progress.router, prefix="/api/progress", tags=["Progress"])
 app.include_router(quiz.router)
 app.include_router(resume.router)
 app.include_router(jobs.router,tags=["Jobs"])
-app.include_router(roadmap.router)
+app.include_router(roadmap1.router)
 app.include_router(aptitude.router, prefix="/api/leaderboard", tags=["Leaderboard"])
 app.include_router(leaderboard.router, tags=["Leaderboard"])
 
