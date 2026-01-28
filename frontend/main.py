@@ -41,10 +41,7 @@ def init_session_state():
 
 init_session_state()
 
-# ===== LOGIN PAGE =====
-# ===== REGISTER PAGE =====
 # ===== HOME PAGE =====
-
 def home_page():
     """Professional Home Page with Project Overview"""
     if not st.session_state.token:
@@ -76,7 +73,7 @@ def home_page():
     
     st.markdown("---")
     
-    # ===== QUICK ACTIONS =====
+    # ===== QUICK ACTIONS (FIXED) =====
     st.markdown("### ⚡ Quick Actions")
     
     col_qa1, col_qa2, col_qa3, col_qa4 = st.columns(4)
@@ -84,7 +81,7 @@ def home_page():
     with col_qa1:
         if st.button("📝 Take a Quiz", use_container_width=True, key="qa_quiz"):
             st.session_state.page = "quiz"
-            st.rerun()
+            st.rerun() # Sidebar will sync automatically in main()
     with col_qa2:
         if st.button("📄 Analyze Resume", use_container_width=True, key="qa_resume"):
             st.session_state.page = "resume"
@@ -241,18 +238,8 @@ def home_page():
             </div>
             """, unsafe_allow_html=True)
 
-# ===== QUIZ PAGE =====
 
-# ===== RESUME PAGE =====
-
-# ===== JOBS PAGE =====
-
-# ===== ROADMAP PAGE =====
-
-# ===== LEADERBOARD PAGE =====
-
-# ===== MAIN NAVIGATION =====
-
+# ===== MAIN NAVIGATION (SYNC LOGIC FIXED) =====
 def main():
     if not hasattr(st.session_state, 'page'):
         st.session_state.page = 'home' if st.session_state.token else 'login'
@@ -268,28 +255,43 @@ def main():
         """, unsafe_allow_html=True)
         
         st.sidebar.markdown("---")
-        
         st.sidebar.markdown("<p style='color: #ffffff; font-weight: 700; padding: 10px 0;'>NAVIGATION</p>", unsafe_allow_html=True)
         
+        # 1. Map Display Name -> Page ID
         pages_map = {
             "🏠 Home": "home",
-            "📝 Quiz": "quiz",
-            "📄 Resume": "resume",
-            "💼 Jobs": "jobs",
+            "📝 Quiz Generator": "quiz",
+            "📄 Resume Analyzer": "resume",
+            "💼 Jobs/Internship": "jobs",
             "🛣️ Roadmap": "roadmap",
             "🏆 Leaderboard": "leaderboard",
         }
         
-        # selected = st.sidebar.radio("", list(pages_map.keys()), key="nav_radio", label_visibility="collapsed")
+        # 2. Determine index based on current 'page' state
+        # Find the key (label) that corresponds to the current page ID
+        current_label = next((k for k, v in pages_map.items() if v == st.session_state.page), "🏠 Home")
+        
+        options = list(pages_map.keys())
+        try:
+            index = options.index(current_label)
+        except ValueError:
+            index = 0
+
+        # 3. Render sidebar with the calculated index
+        # We removed 'key="nav_radio"' to allow programmatic index setting without conflict
         selected = st.sidebar.radio(
             "Navigation",
-            list(pages_map.keys()),
-            key="nav_radio",
+            options,
+            index=index,
             label_visibility="collapsed"
         )
 
-        st.session_state.page = pages_map[selected]
-        
+        # 4. Handle Navigation Change
+        # If user clicked a different option in sidebar, update state
+        if pages_map[selected] != st.session_state.page:
+            st.session_state.page = pages_map[selected]
+            st.rerun()
+
         st.sidebar.markdown("---")
         
         if st.sidebar.button("🚪 LOGOUT", use_container_width=True, key="btn_logout"):

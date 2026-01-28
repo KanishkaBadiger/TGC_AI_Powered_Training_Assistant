@@ -2,7 +2,6 @@ import sys
 import os
 from dotenv import load_dotenv
 
-from backend.routes import roadmap1
 load_dotenv()
 
 # 1. Add the parent directory (Project Root) to sys.path

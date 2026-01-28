@@ -183,14 +183,14 @@ def register(user: UserRegister, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_user) # Get the new ID
 
-        # 4. Create Linked Tables (Profile, Streak, etc.)
-        new_profile = models.UserProfile(user_id=new_user.id)
-        new_progress = models.UserProgress(user_id=new_user.id)
-        new_streak = models.Streak(user_id=new_user.id)
-        new_leaderboard = models.Leaderboard(user_id=new_user.id, rank=999999)
+        # # 4. Create Linked Tables (Profile, Streak, etc.)
+        # new_profile = models.UserProfile(user_id=new_user.id)
+        # new_progress = models.UserProgress(user_id=new_user.id)
+        # new_streak = models.Streak(user_id=new_user.id)
+        # new_leaderboard = models.Leaderboard(user_id=new_user.id, rank=999999)
 
-        db.add_all([new_profile, new_progress, new_streak, new_leaderboard])
-        db.commit()
+        # db.add_all([new_profile, new_progress, new_streak, new_leaderboard])
+        # db.commit()
 
         return {"message": "User registered successfully", "email": user.email}
 
